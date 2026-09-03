@@ -108,11 +108,10 @@ The node accepts the following ComfyUI data types and converts them for use in c
 
 | Type | Handling |
 |------|----------|
-| `str`, `int`, `float`, `bool` | Converted to string representation |
-| `torch.Tensor` (image) | Saved as temporary PNG file |
-| Audio dict (`waveform` + `sample_rate`) | Saved as temporary WAV file |
-| `VideoInput` (comfy_api) | Source file extracted or saved as temporary MP4 |
-| Other media objects (with `path`/`filename` attribute) | Path auto-extracted |
+| Image | Converted to temporary PNG file |
+| Video | Converted to temporary MP4 file |
+| Audio | Converted to temporary WAV file |
+| Text (`str`, `int`, `float`, `bool`) | Converted to string representation |
 
 ## Dependencies
 
