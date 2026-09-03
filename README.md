@@ -2,6 +2,8 @@
 
 Execute shell commands/scripts directly within ComfyUI workflows, with streaming output and dynamic input slots.
 
+![demo](demo.png)
+
 ## Features
 
 - **Command Execution**: Run arbitrary shell commands and scripts via `/bin/bash` (configurable)
