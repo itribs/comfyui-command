@@ -56,6 +56,8 @@ Use the following placeholders in the `command` field:
 | Placeholder | Description |
 |-------------|-------------|
 | `{input0}`, `{input1}`, ... | Replaced with the corresponding input slot value (paths are auto-quoted for spaces) |
+| `{input_count}` | Replaced with the number of connected input slots |
+| `{input_all}` | All input paths (auto-quoted, suitable for bash array expansion) |
 | `{seed}` | Replaced with the seed value |
 
 Examples:
@@ -69,6 +71,13 @@ convert {input0} -resize 512x512 -quality 90 output.jpg
 
 # Call a Python script
 python3 /path/to/script.py --input {input0} --seed {seed}
+
+# Batch process all inputs via bash array
+arr=({input_all})
+for f in "${arr[@]}"; do
+    echo "Processing: $f"
+    convert "$f" -resize 256x256 "${f%.*}_thumb.png"
+done
 ```
 
 ## Environment Variables
@@ -80,13 +89,14 @@ The following environment variables are available during command execution:
 | `$INPUT_0`, `$INPUT_1`, ... | File path of the corresponding input slot |
 | `$SEED` | Seed value |
 | `$INPUT_COUNT` | Number of connected input slots |
-| `$INPUT_ALL` | All input paths (space-separated, auto-quoted) |
+| `$INPUT_ALL` | All input paths (auto-quoted, suitable for bash array expansion) |
 
 Example:
 
 ```bash
-# Batch process all inputs
-for f in $INPUT_ALL; do
+# Batch process all inputs via bash array (handles spaces, quotes, newlines correctly)
+eval "arr=($INPUT_ALL)"
+for f in "${arr[@]}"; do
     echo "Processing: $f"
     convert "$f" -resize 256x256 "${f%.*}_thumb.png"
 done

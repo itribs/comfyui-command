@@ -199,7 +199,7 @@ class CommandNode:
                 "command": ("STRING", {
                     "multiline": True,
                     "default": "echo input: {input0} seed: {seed}",
-                    "tooltip": "Placeholders: {input0} maps to slot Input 0\n"
+                    "tooltip": "Placeholders: {input0} {input_count} {input_all} {seed}\n"
                                "Environment variables: $INPUT_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL"
                 }),
                 "working_dir": ("STRING", {
@@ -247,7 +247,7 @@ class CommandNode:
     def _resolve_command(self, command: str,
                          placeholder_map: Dict[int, str],
                          seed: int) -> Tuple[str, Set[int]]:
-        """Resolve {inputN} and {seed} placeholders, auto-quote paths with spaces. Returns (command, set of missing slot indices)"""
+        """Resolve {inputN}, {input_count}, {input_all}, {seed} placeholders, auto-quote paths with spaces. Returns (command, set of missing slot indices)"""
         missing: Set[int] = set()
 
         def _sub(match):
@@ -259,6 +259,11 @@ class CommandNode:
 
         command = re.sub(r"\{input(\d+)\}", _sub, command)
         command = command.replace("{seed}", str(seed))
+
+        keys = sorted(placeholder_map.keys())
+        command = command.replace("{input_count}", str(len(keys)))
+        command = command.replace("{input_all}", " ".join(shlex.quote(placeholder_map[k]) for k in keys))
+
         return command, missing
 
     # ---------------- Environment variables ----------------
