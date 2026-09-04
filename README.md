@@ -111,16 +111,6 @@ The node accepts the following ComfyUI data types and converts them for use in c
 | Audio | Converted to temporary WAV file |
 | Text (`str`, `int`, `float`, `bool`) | Converted to string representation |
 
-## Dependencies
-
-The following Python packages are required (most are already included in ComfyUI):
-
-- `numpy` — array processing
-- `Pillow` — image processing
-- `scipy` — audio file writing
-
-`torch` and `folder_paths` are provided by ComfyUI. `comfy_api` is optional and only needed for `VideoInput` support.
-
 ## License
 
 MIT License
