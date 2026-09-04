@@ -10,8 +10,6 @@ Execute shell commands/scripts directly within ComfyUI workflows, with streaming
 - **Dynamic Input Slots**: Automatically expand input slots on connection (up to 20), supporting images, audio, video, text, and more
 - **Placeholder Substitution**: Use `{input0}`, `{input1}`, `{seed}` placeholders in commands to reference inputs and seed
 - **Environment Variables**: Access parameters via `$INPUT_0`, `$INPUT_1`, `$SEED`, `$INPUT_COUNT`, `$INPUT_ALL`
-- **Streaming Output**: Real-time stdout/stderr display with auto-scrolling output panel
-- **Result Caching**: SHA256 fingerprint-based cache to avoid re-executing identical commands
 - **Timeout Protection**: Configurable timeout (1-3600 seconds), auto-terminates on timeout
 - **Separate Outputs**: stdout, stderr, and exit code are returned as distinct outputs for flexible workflow routing
 
