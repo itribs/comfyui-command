@@ -74,7 +74,8 @@ app.registerExtension({
                 let emptyTail = 0;
                 for (let i = this.inputs.length - 1; i >= 0; i--) {
                     const s = this.inputs[i];
-                    if (isCommandSlot(s) && s.link == null) emptyTail++;
+                    if (!isCommandSlot(s)) continue;
+                    if (s.link == null) emptyTail++;
                     else break;
                 }
                 // emptyTail = consecutive trailing empty slots; keep 1, remove the excess
