@@ -17,7 +17,7 @@ Execute shell commands/scripts directly within ComfyUI workflows, with streaming
 
 ```bash
 cd ComfyUI/custom_nodes/
-git clone https://github.com/yourusername/comfyui-command.git
+git clone https://github.com/itribs/comfyui-command.git
 pip install -r requirements.txt
 ```
 
