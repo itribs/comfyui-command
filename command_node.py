@@ -9,6 +9,7 @@ import traceback
 import threading
 import codecs
 import tempfile
+from collections import Counter
 from typing import Dict, List, Optional, Tuple, Set
 
 import numpy as np
@@ -199,8 +200,8 @@ class CommandNode:
                 "command": ("STRING", {
                     "multiline": True,
                     "default": "echo input: {input0} seed: {seed}",
-                    "tooltip": "Placeholders: {input0} {input_count} {input_all} {seed}\n"
-                               "Environment variables: $INPUT_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL"
+                    "tooltip": "Placeholders: {input0} {input_count} {input_all} {input_image_count} {input_video_count} {input_audio_count} {seed}\n"
+                               "Environment variables: $INPUT_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL $INPUT_IMAGE_COUNT $INPUT_VIDEO_COUNT $INPUT_AUDIO_COUNT"
                 }),
                 "working_dir": ("STRING", {
                     "default": os.getcwd(),
@@ -242,12 +243,36 @@ class CommandNode:
     CATEGORY = "utils/command"
     OUTPUT_NODE = False
 
+    # ---------------- Input type classification ----------------
+
+    @staticmethod
+    def _classify_input_type(v) -> str:
+        if _is_audio_dict(v):
+            return "audio"
+        if isinstance(v, torch.Tensor):
+            return "image"
+        if VideoInput is not None and isinstance(v, VideoInput):
+            return "video"
+        if isinstance(v, dict):
+            for key in ("path", "filename", "fullpath"):
+                if key in v and isinstance(v[key], str):
+                    ext = os.path.splitext(v[key])[1].lower()
+                    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff'):
+                        return "image"
+                    if ext in ('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv'):
+                        return "video"
+                    if ext in ('.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a'):
+                        return "audio"
+                    break
+        return "other"
+
     # ---------------- Placeholder resolution ----------------
 
     def _resolve_command(self, command: str,
                          placeholder_map: Dict[int, str],
+                         type_map: Dict[int, str],
                          seed: int) -> Tuple[str, Set[int]]:
-        """Resolve {inputN}, {input_count}, {input_all}, {seed} placeholders, auto-quote paths with spaces. Returns (command, set of missing slot indices)"""
+        """Resolve {inputN}, {input_count}, {input_all}, {input_image_count}, {input_video_count}, {input_audio_count}, {seed} placeholders"""
         missing: Set[int] = set()
 
         def _sub(match):
@@ -264,17 +289,27 @@ class CommandNode:
         command = command.replace("{input_count}", str(len(keys)))
         command = command.replace("{input_all}", " ".join(shlex.quote(placeholder_map[k]) for k in keys))
 
+        counter = Counter(type_map.values())
+        command = command.replace("{input_image_count}", str(counter.get("image", 0)))
+        command = command.replace("{input_video_count}", str(counter.get("video", 0)))
+        command = command.replace("{input_audio_count}", str(counter.get("audio", 0)))
+
         return command, missing
 
     # ---------------- Environment variables ----------------
 
-    def _build_env(self, placeholder_map: Dict[int, str], seed: int) -> dict:
+    def _build_env(self, placeholder_map: Dict[int, str], type_map: Dict[int, str], seed: int) -> dict:
         env = os.environ.copy()
         env["SEED"] = str(seed)
 
         keys = sorted(placeholder_map.keys())
         env["INPUT_COUNT"] = str(len(keys))
         env["INPUT_ALL"] = " ".join(shlex.quote(placeholder_map[k]) for k in keys)
+
+        counter = Counter(type_map.values())
+        env["INPUT_IMAGE_COUNT"] = str(counter.get("image", 0))
+        env["INPUT_VIDEO_COUNT"] = str(counter.get("video", 0))
+        env["INPUT_AUDIO_COUNT"] = str(counter.get("audio", 0))
 
         for n in range(self.INPUT_MAX):
             key = f"INPUT_{n}"
@@ -366,21 +401,24 @@ class CommandNode:
 
             # 2. Collect inputs
             placeholder_map: Dict[int, str] = {}
+            type_map: Dict[int, str] = {}
             for k, v in kwargs.items():
                 m = re.fullmatch(r"input_(\d+)", k)
                 if m and v is not None:
+                    idx = int(m.group(1))
+                    type_map[idx] = self._classify_input_type(v)
                     path = _extract_media_path(v)
                     if path is not None:
-                        placeholder_map[int(m.group(1))] = path
+                        placeholder_map[idx] = path
                     elif isinstance(v, (str, int, float, bool)):
-                        placeholder_map[int(m.group(1))] = str(v)
+                        placeholder_map[idx] = str(v)
                     else:
                         raise ValueError(
                             f"Input input_{m.group(1)} could not be resolved to a file path"
                             f" (received type: {type(v).__name__})")
 
             # 3. Placeholder validation
-            resolved_command, missing = self._resolve_command(command, placeholder_map, seed)
+            resolved_command, missing = self._resolve_command(command, placeholder_map, type_map, seed)
             if missing:
                 nums = ", ".join(str(n) for n in sorted(missing))
                 raise ValueError(f"Command references unconnected input(s): input {nums}")
@@ -406,7 +444,7 @@ class CommandNode:
                 raise ValueError(f"Working directory does not exist: {working_dir}")
 
             # 6. Environment variables
-            env = self._build_env(placeholder_map, seed)
+            env = self._build_env(placeholder_map, type_map, seed)
 
             # 7. Start process
             print(f"[CommandNode] {resolved_command}", flush=True)

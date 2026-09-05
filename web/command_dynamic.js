@@ -125,8 +125,8 @@ app.registerExtension({
             const commandWidget = this.widgets?.find(w => w.name === "command");
             if (commandWidget) {
                 commandWidget.tooltip =
-                    "Placeholders: {input0} maps to slot Input 0\n" +
-                    "Environment variables: $INPUT_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL";
+                    "Placeholders: {input0} {input_count} {input_all} {input_image_count} {input_video_count} {input_audio_count} {seed}\n" +
+                    "Environment variables: $INPUT_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL $INPUT_IMAGE_COUNT $INPUT_VIDEO_COUNT $INPUT_AUDIO_COUNT";
             }
 
             this.addCommandOutputPanel();
