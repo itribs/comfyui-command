@@ -16,9 +16,13 @@ from .media_utils import extract_media_path, classify_input_type
 
 
 class RB_Command:
-    """Command execution node"""
-
+    RETURN_TYPES = ("STRING", "STRING", "INT")
+    RETURN_NAMES = ("stdout", "stderr", "exit_code")
+    FUNCTION = "execute_command"
+    CATEGORY = "utils/command"
+    OUTPUT_NODE = False
     DESCRIPTION = "Execute shell commands/scripts with dynamic inputs, and result caching. Supports placeholders ({input0}, {seed}) and environment variables ($INPUT_0, $SEED, etc.)."
+
     INPUT_MAX = 20
     CACHE_MAXSIZE = 1
 
@@ -68,12 +72,6 @@ class RB_Command:
                 "extra_pnginfo": "EXTRA_PNGINFO"
             }
         }
-
-    RETURN_TYPES = ("STRING", "STRING", "INT")
-    RETURN_NAMES = ("stdout", "stderr", "exit_code")
-    FUNCTION = "execute_command"
-    CATEGORY = "utils/command"
-    OUTPUT_NODE = False
 
     # ---------------- Summary computation ----------------
 
