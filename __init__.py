@@ -1,14 +1,15 @@
-from .command_node import CommandNode
+import os
+
+from .command import RB_Command
 
 NODE_CLASS_MAPPINGS = {
-    "CommandNode": CommandNode
+    "RB_Command": RB_Command
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "CommandNode": "Command Node"
+    "RB_Command": "RB Command"
 }
 
-# Set web directory for frontend JS extension support
-WEB_DIRECTORY = "./web"
+WEB_DIRECTORY = os.path.join(os.path.dirname(__file__), "web")
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']

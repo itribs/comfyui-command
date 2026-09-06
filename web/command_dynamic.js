@@ -1,5 +1,5 @@
 /**
- * CommandNode - Dynamic inputs (strictly aligned with Impact Pack MakeImageBatch) + streaming output
+ * RB_Command - Dynamic inputs (strictly aligned with Impact Pack MakeImageBatch) + streaming output
  *
  * Alignment notes:
  * 1. Synchronous add/remove inside onConnectionsChange, no defer
@@ -11,12 +11,13 @@
  */
 import { app } from "/scripts/app.js";
 import { api } from "/scripts/api.js";
+import { getNode } from "./graph_utils.js";
+import { installCommandOutputPanel } from "./command_panel.js";
 
 const INPUT_MAX = 20;
-const OUTPUT_MAX_LINES = 500;
 
 app.registerExtension({
-    name: "comfyui.CommandNode",
+    name: "comfyui.rb.Command",
 
     async setup() {
         // Load external CSS
@@ -32,8 +33,14 @@ app.registerExtension({
         // Listen for backend streaming output
         api.addEventListener("command_node_output", (event) => {
             const { node: nodeId, data } = event.detail;
-            const node = app.graph.getNodeById(Number(nodeId));
-            if (node && node.commandOutputEl) {
+
+            const node = getNode(app, nodeId);
+            if (!node) return;
+            // For sub-workflow wrappers, install the output panel on the fly
+            if (!node.commandOutputEl) {
+                installCommandOutputPanel(node);
+            }
+            if (node.commandOutputEl) {
                 if (data === "[CLEAR]") {
                     node.commandOutputEl.innerHTML = "";
                 } else {
@@ -41,10 +48,19 @@ app.registerExtension({
                 }
             }
         });
+
+        // When user opens a sub-workflow, scroll all command outputs to bottom
+        app.canvas?.canvas?.addEventListener("subgraph-opened", () => {
+            requestAnimationFrame(() => {
+                document.querySelectorAll(".command-output").forEach(el => {
+                    el.scrollTop = el.scrollHeight;
+                });
+            });
+        });
     },
 
     beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name !== "CommandNode") return;
+        if (nodeData.name !== "RB_Command") return;
 
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function (type, index, connected, link_info) {
@@ -136,123 +152,7 @@ app.registerExtension({
 
         // ---------------- Output panel ----------------
         nodeType.prototype.addCommandOutputPanel = function () {
-            if (this.commandOutputWrapper) return;
-
-            const wrapper = document.createElement("div");
-            wrapper.className = "command-output-wrapper";
-
-            const header = document.createElement("div");
-            header.className = "command-output-header";
-            header.innerHTML = `
-                <span class="cn-title">Command Output</span>
-                <span class="cn-actions">
-                    <span class="cn-copy" title="Copy output">⧉</span>
-                    <span class="cn-copy-ok">✓</span>
-                </span>
-            `;
-
-            const outputEl = document.createElement("div");
-            outputEl.className = "command-output";
-
-            const copyBtn = header.querySelector(".cn-copy");
-            const copyOk = header.querySelector(".cn-copy-ok");
-
-            copyBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const text = Array.from(outputEl.children)
-                    .map(el => el.textContent)
-                    .join("\n");
-                navigator.clipboard.writeText(text).then(() => {
-                    copyBtn.style.display = "none";
-                    copyOk.style.display = "inline-flex";
-                    setTimeout(() => {
-                        copyOk.style.display = "none";
-                        copyBtn.style.display = "inline-flex";
-                    }, 1500);
-                }).catch(() => {});
-            });
-
-            wrapper.appendChild(header);
-            wrapper.appendChild(outputEl);
-
-            this.addDOMWidget("command_output", "custom", wrapper, {
-                getValue: () => "",
-                setValue: () => {}
-            });
-
-            const cmdWidget = this.widgets ? this.widgets[this.widgets.length - 1] : null;
-            if (cmdWidget) {
-                cmdWidget.computeSize = function () {
-                    return [this.size?.[0] || 0, wrapper.offsetHeight + 20];
-                };
-            }
-
-            const handle = document.createElement("div");
-            handle.className = "cn-resize-handle";
-            let startY = 0, startH = 0;
-            handle.addEventListener("mousedown", (e) => {
-                e.preventDefault();
-                startY = e.clientY;
-                startH = wrapper.offsetHeight;
-                const onMove = (ev) => {
-                    const newH = Math.max(100, startH + (startY - ev.clientY));
-                    wrapper.style.height = newH + "px";
-                    if (cmdWidget) cmdWidget.size[1] = newH;
-                };
-                const onUp = () => {
-                    document.removeEventListener("mousemove", onMove);
-                    document.removeEventListener("mouseup", onUp);
-                };
-                document.addEventListener("mousemove", onMove);
-                document.addEventListener("mouseup", onUp);
-            });
-            wrapper.insertBefore(handle, outputEl);
-
-            this.commandOutputWrapper = wrapper;
-            this.commandOutputEl = outputEl;
-
-            this.appendCommandOutput = (text) => {
-                const wasAtBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 5;
-
-                if (text.startsWith("\x01")) {
-                    text = text.slice(1);
-                    const lastLine = outputEl.lastElementChild;
-                    if (lastLine && lastLine.classList.contains("cn-partial")) {
-                        lastLine.textContent = text;
-                    } else {
-                        const line = document.createElement("div");
-                        line.className = "command-line cn-partial";
-                        line.textContent = text;
-                        outputEl.appendChild(line);
-                    }
-                } else {
-                    text = text.trim();
-                    if (!text) text = "\u00A0";
-                    const lastLine = outputEl.lastElementChild;
-                    if (lastLine && lastLine.classList.contains("cn-partial")) {
-                        lastLine.textContent = text;
-                        lastLine.classList.remove("cn-partial");
-                    } else {
-                        const line = document.createElement("div");
-                        line.className = "command-line";
-                        line.textContent = text;
-                        outputEl.appendChild(line);
-                    }
-                }
-                while (outputEl.childElementCount > OUTPUT_MAX_LINES) {
-                    outputEl.removeChild(outputEl.firstChild);
-                }
-                if (wasAtBottom) {
-                    requestAnimationFrame(() => {
-                        outputEl.scrollTop = outputEl.scrollHeight;
-                    });
-                }
-            };
-
-            const origOnExecutionStart = this.onExecutionStart;
-            this.onExecutionStart = function () {
-                origOnExecutionStart?.apply(this, arguments);
-            };
+            installCommandOutputPanel(this);
         };
     },
 });

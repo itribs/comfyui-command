@@ -1,5 +1,4 @@
 import os
-import io
 import re
 import sys
 import shlex
@@ -8,190 +7,23 @@ import hashlib
 import traceback
 import threading
 import codecs
-import tempfile
 from collections import Counter
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Tuple, Set, Union
 
-import numpy as np
-from PIL import Image
-import torch
-from scipy.io import wavfile
-import folder_paths
 from server import PromptServer
 
-try:
-    from comfy_api.latest import VideoInput
-except ImportError:
-    VideoInput = None
+from .media_utils import extract_media_path, classify_input_type
 
 
-def _is_audio_dict(value) -> bool:
-    return isinstance(value, dict) and "waveform" in value and "sample_rate" in value
-
-
-def _extract_media_path(value) -> Optional[str]:
-    """Extract file path from ComfyUI data types, returns None on failure"""
-    if isinstance(value, str):
-        if os.path.exists(value):
-            return value
-        full = os.path.join(folder_paths.get_input_directory(), value)
-        if os.path.exists(full):
-            return full
-        return None
-
-    if _is_audio_dict(value):
-        return _audio_to_temp_file(value["waveform"], value["sample_rate"])
-
-    if isinstance(value, dict):
-        for key in ("path", "filename", "fullpath"):
-            if key in value and isinstance(value[key], str):
-                candidate = value[key]
-                if os.path.isabs(candidate):
-                    return candidate if os.path.exists(candidate) else None
-                full = os.path.join(folder_paths.get_input_directory(), candidate)
-                if os.path.exists(full):
-                    return full
-
-    if isinstance(value, torch.Tensor):
-        return _tensor_to_temp_file(value)
-
-    return _extract_path_from_object(value)
-
-
-def _detect_extension_from_bytes(data: bytes) -> str:
-    """Detect file format via magic bytes, returns extension (with dot), falls back to .bin"""
-    if len(data) < 4:
-        return ".bin"
-
-    if data[:4] == b"\x89PNG":
-        return ".png"
-    if data[:2] == b"\xff\xd8":
-        return ".jpg"
-    if data[:4] == b"RIFF":
-        if len(data) >= 12 and data[8:12] == b"AVI ":
-            return ".avi"
-        if len(data) >= 12 and data[8:12] == b"WAVE":
-            return ".wav"
-        return ".bin"
-    if data[:4] == b"\x1a\x45\xdf\xa3":
-        return ".webm"
-    if data[:4] == b"FLV\x01":
-        return ".flv"
-    if data[:3] == b"ID3" or (data[0] == 0xff and (data[1] & 0xe0) == 0xe0):
-        return ".mp3"
-    if data[4:8] == b"ftyp":
-        return ".mp4"
-    if data[:4] == b"\x00\x00\x00\x1c" and data[4:8] == b"ftyp":
-        return ".mp4"
-
-    return ".bin"
-
-
-def _video_save_to_temp(value) -> Optional[str]:
-    """Reference implementation from official SaveVideo, calls save_to directly to temp file, avoids BytesIO roundtrip"""
-    fd, path = tempfile.mkstemp(suffix=".mp4", prefix="command_input_")
-    os.close(fd)
-    try:
-        value.save_to(path)
-        return path
-    except Exception:
-        return None
-
-
-def _extract_path_from_object(value) -> Optional[str]:
-    """Extract file path from arbitrary object, prioritizing VideoFromFile and other media types"""
-    # VideoInput type: prefer get_stream_source for file path, otherwise use save_to directly
-    if VideoInput is not None and isinstance(value, VideoInput):
-        stream_source = getattr(value, "get_stream_source", None)
-        if callable(stream_source):
-            try:
-                src = stream_source()
-            except Exception:
-                src = None
-            if isinstance(src, str) and os.path.exists(src):
-                return src
-        return _video_save_to_temp(value)
-
-    # Other types: try get_stream_source
-    stream_source = getattr(value, "get_stream_source", None)
-    if callable(stream_source):
-        try:
-            src = stream_source()
-        except Exception:
-            src = None
-        if isinstance(src, str) and os.path.exists(src):
-            return src
-        if isinstance(src, io.BytesIO):
-            return _bytesio_to_temp_file(src)
-
-    for attr in ("path", "file", "filename", "fullpath", "name"):
-        candidate = getattr(value, attr, None)
-        if callable(candidate):
-            try:
-                candidate = candidate()
-            except Exception:
-                continue
-        if isinstance(candidate, str) and os.path.exists(candidate):
-            return candidate
-    return None
-
-
-def _bytesio_to_temp_file(data: io.BytesIO) -> str:
-    """Save BytesIO content to temp file, returns path"""
-    raw = data.getvalue()
-    ext = _detect_extension_from_bytes(raw)
-    fd, path = tempfile.mkstemp(suffix=ext, prefix="command_input_")
-    os.close(fd)
-    with open(path, "wb") as f:
-        f.write(raw)
-    return path
-
-def _tensor_to_temp_file(tensor: torch.Tensor) -> str:
-    """Save torch.Tensor (image) as temp PNG file, returns path"""
-    tensor = tensor.cpu().detach()
-
-    if tensor.ndim == 4:
-        tensor = tensor[0].contiguous()
-    if tensor.ndim != 3:
-        raise ValueError(f"Unsupported tensor dimensions: {tensor.ndim} (expected 3D HWC)")
-
-    arr = np.clip(255. * tensor.numpy(), 0, 255).astype(np.uint8)
-    if arr.shape[-1] == 3:
-        img = Image.fromarray(arr, "RGB")
-    elif arr.shape[-1] == 4:
-        img = Image.fromarray(arr, "RGBA")
-    else:
-        img = Image.fromarray(arr, "L")
-
-    fd, path = tempfile.mkstemp(suffix=".png", prefix="command_input_")
-    os.close(fd)
-    img.save(path, "PNG")
-    return path
-
-
-def _audio_to_temp_file(waveform: torch.Tensor, sample_rate: int) -> str:
-    """Save audio dict (waveform Tensor + sample_rate) as temp WAV file, returns path"""
-    waveform = waveform.cpu().detach()
-    if waveform.ndim == 3 and waveform.shape[0] == 1:
-        waveform = waveform.squeeze(0)
-    if waveform.ndim != 2:
-        raise ValueError(f"Unsupported audio waveform dimensions: {waveform.ndim} (expected (channels, samples))")
-
-    arr = waveform.contiguous().numpy().astype(np.float32)
-    arr = arr.T
-
-    fd, path = tempfile.mkstemp(suffix=".wav", prefix="command_input_")
-    os.close(fd)
-    wavfile.write(path, int(sample_rate), arr)
-    return path
-
-
-class CommandNode:
+class RB_Command:
     """Command execution node (streaming output + dynamic inputs, Impact Pack pattern)"""
 
     DESCRIPTION = "Execute shell commands/scripts with dynamic inputs, streaming output, and result caching. Supports placeholders ({input0}, {seed}) and environment variables ($INPUT_0, $SEED, etc.)."
     INPUT_MAX = 20
     CACHE_MAXSIZE = 1
+
+    def __init__(self):
+        self._cache: Dict[str, Tuple[str, str, int]] = {}
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -243,28 +75,19 @@ class CommandNode:
     CATEGORY = "utils/command"
     OUTPUT_NODE = False
 
-    # ---------------- Input type classification ----------------
+    # ---------------- Summary computation ----------------
 
-    @staticmethod
-    def _classify_input_type(v) -> str:
-        if _is_audio_dict(v):
-            return "audio"
-        if isinstance(v, torch.Tensor):
-            return "image"
-        if VideoInput is not None and isinstance(v, VideoInput):
-            return "video"
-        if isinstance(v, dict):
-            for key in ("path", "filename", "fullpath"):
-                if key in v and isinstance(v[key], str):
-                    ext = os.path.splitext(v[key])[1].lower()
-                    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff'):
-                        return "image"
-                    if ext in ('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv'):
-                        return "video"
-                    if ext in ('.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a'):
-                        return "audio"
-                    break
-        return "other"
+    def _compute_summary(self, placeholder_map: Dict[int, str], type_map: Dict[int, str]) -> Dict[str, Union[List[int], int, str]]:
+        keys = sorted(placeholder_map.keys())
+        counter = Counter(type_map.values())
+        return {
+            "keys": keys,
+            "count": len(keys),
+            "all": " ".join(shlex.quote(placeholder_map[k]) for k in keys),
+            "image_count": counter.get("image", 0),
+            "video_count": counter.get("video", 0),
+            "audio_count": counter.get("audio", 0),
+        }
 
     # ---------------- Placeholder resolution ----------------
 
@@ -285,14 +108,12 @@ class CommandNode:
         command = re.sub(r"\{input(\d+)\}", _sub, command)
         command = command.replace("{seed}", str(seed))
 
-        keys = sorted(placeholder_map.keys())
-        command = command.replace("{input_count}", str(len(keys)))
-        command = command.replace("{input_all}", " ".join(shlex.quote(placeholder_map[k]) for k in keys))
-
-        counter = Counter(type_map.values())
-        command = command.replace("{input_image_count}", str(counter.get("image", 0)))
-        command = command.replace("{input_video_count}", str(counter.get("video", 0)))
-        command = command.replace("{input_audio_count}", str(counter.get("audio", 0)))
+        s = self._compute_summary(placeholder_map, type_map)
+        command = command.replace("{input_count}", str(s["count"]))
+        command = command.replace("{input_all}", s["all"])
+        command = command.replace("{input_image_count}", str(s["image_count"]))
+        command = command.replace("{input_video_count}", str(s["video_count"]))
+        command = command.replace("{input_audio_count}", str(s["audio_count"]))
 
         return command, missing
 
@@ -302,14 +123,12 @@ class CommandNode:
         env = os.environ.copy()
         env["SEED"] = str(seed)
 
-        keys = sorted(placeholder_map.keys())
-        env["INPUT_COUNT"] = str(len(keys))
-        env["INPUT_ALL"] = " ".join(shlex.quote(placeholder_map[k]) for k in keys)
-
-        counter = Counter(type_map.values())
-        env["INPUT_IMAGE_COUNT"] = str(counter.get("image", 0))
-        env["INPUT_VIDEO_COUNT"] = str(counter.get("video", 0))
-        env["INPUT_AUDIO_COUNT"] = str(counter.get("audio", 0))
+        s = self._compute_summary(placeholder_map, type_map)
+        env["INPUT_COUNT"] = str(s["count"])
+        env["INPUT_ALL"] = s["all"]
+        env["INPUT_IMAGE_COUNT"] = str(s["image_count"])
+        env["INPUT_VIDEO_COUNT"] = str(s["video_count"])
+        env["INPUT_AUDIO_COUNT"] = str(s["audio_count"])
 
         for n in range(self.INPUT_MAX):
             key = f"INPUT_{n}"
@@ -332,18 +151,30 @@ class CommandNode:
         h.update(str(timeout).encode("utf-8"))
         for n in sorted(placeholder_map.keys()):
             path = placeholder_map[n]
-            if os.path.isfile(path):
+            try:
                 st = os.stat(path)
                 h.update(f"{n}:{path}:{st.st_size}:{st.st_mtime_ns}".encode())
-            else:
+            except OSError:
                 h.update(f"{n}:{path}".encode())
         return h.hexdigest()
+
+    # ---------------- Node ID resolution for sub-workflows ----------------
+
+    @staticmethod
+    def _resolve_node_id(unique_id):
+        """Resolve node ID for sub-workflow support.
+
+        In sub-workflows, unique_id is an ephemeral ID like "565:552"
+        (parent_id:child_id). Returns the full ID string for the frontend
+        to locate the node via graph_utils.getNode().
+        """
+        return str(unique_id) if not isinstance(unique_id, str) else unique_id
 
     # ---------------- Streaming output ----------------
 
     def _pump(self, stream, prefix, unique_id, line_list):
+        node_id = self._resolve_node_id(unique_id)
         buf = ""
-        first = True
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while True:
             raw = stream.read(4096)
@@ -351,11 +182,7 @@ class CommandNode:
                 break
             chunk = decoder.decode(raw, final=False)
 
-            if first:
-                sys.stdout.write(prefix + chunk.replace("\n", "\n" + prefix))
-                first = False
-            else:
-                sys.stdout.write(chunk.replace("\n", "\n" + prefix))
+            sys.stdout.write(prefix + chunk.replace("\n", "\n" + prefix))
             sys.stdout.flush()
 
             buf += chunk
@@ -365,7 +192,7 @@ class CommandNode:
                 line_list.append(line)
                 try:
                     PromptServer.instance.send_sync("command_node_output", {
-                        "node": unique_id,
+                        "node": node_id,
                         "data": line
                     })
                 except Exception:
@@ -373,11 +200,14 @@ class CommandNode:
             if buf:
                 try:
                     PromptServer.instance.send_sync("command_node_output", {
-                        "node": unique_id,
+                        "node": node_id,
                         "data": f"\x01{buf}"
                     })
                 except Exception:
                     pass
+        final = decoder.decode(b"", final=True)
+        if final:
+            buf += final
         if buf:
             line_list.append(buf)
             sys.stdout.write("\n")
@@ -391,11 +221,14 @@ class CommandNode:
         stdout_lines: List[str] = []
         stderr_lines: List[str] = []
         proc = None
+        node_id = self._resolve_node_id(unique_id)
+        temp_files: List[str] = []
         try:
             # 1. Clear frontend output
             try:
                 PromptServer.instance.send_sync("command_node_output", {
-                    "node": unique_id, "data": "[CLEAR]"})
+                    "node": node_id,
+                    "data": "[CLEAR]"})
             except Exception:
                 pass
 
@@ -406,8 +239,8 @@ class CommandNode:
                 m = re.fullmatch(r"input_(\d+)", k)
                 if m and v is not None:
                     idx = int(m.group(1))
-                    type_map[idx] = self._classify_input_type(v)
-                    path = _extract_media_path(v)
+                    type_map[idx] = classify_input_type(v)
+                    path = extract_media_path(v, temp_files=temp_files)
                     if path is not None:
                         placeholder_map[idx] = path
                     elif isinstance(v, (str, int, float, bool)):
@@ -428,13 +261,14 @@ class CommandNode:
                 command, seed, working_dir, executable, timeout, placeholder_map)
             cached = self._cache.get(fingerprint)
             if cached is not None:
-                print(f"[CommandNode] Cache hit, skipping execution", flush=True)
-                for stream_name, lines in [("[CommandNode] ", cached[0].split("\n")), ("[CommandNode] ", cached[1].split("\n"))]:
+                print(f"[RB_Command] Cache hit, skipping execution", flush=True)
+                for stream_name, lines in [("[RB_Command] ", cached[0].split("\n")), ("[RB_Command Error] ", cached[1].split("\n"))]:
                     for line in lines:
                         entry = f"{stream_name}{line}"
                         try:
                             PromptServer.instance.send_sync("command_node_output", {
-                                "node": unique_id, "data": entry})
+                                "node": node_id,
+                                "data": entry})
                         except Exception:
                             pass
                 return cached
@@ -447,7 +281,7 @@ class CommandNode:
             env = self._build_env(placeholder_map, type_map, seed)
 
             # 7. Start process
-            print(f"[CommandNode] {resolved_command}", flush=True)
+            print(f"[RB_Command] {resolved_command}", flush=True)
             creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             proc = subprocess.Popen(
                 resolved_command,
@@ -464,10 +298,10 @@ class CommandNode:
             # 8. Dual-thread streaming read
             t_out = threading.Thread(
                 target=self._pump,
-                args=(proc.stdout, "[CommandNode] ", unique_id, stdout_lines), daemon=True)
+                args=(proc.stdout, "[RB_Command] ", unique_id, stdout_lines), daemon=True)
             t_err = threading.Thread(
                 target=self._pump,
-                args=(proc.stderr, "[CommandNode] ", unique_id, stderr_lines), daemon=True)
+                args=(proc.stderr, "[RB_Command Error] ", unique_id, stderr_lines), daemon=True)
             t_out.start()
             t_err.start()
 
@@ -478,7 +312,7 @@ class CommandNode:
 
             exit_code = proc.returncode
 
-            # 10. Cache and return (keep only last entry)
+            # 10. Cache and return
             result = ("\n".join(stdout_lines).strip(), "\n".join(stderr_lines).strip(), exit_code)
             self._cache.clear()
             self._cache[fingerprint] = result
@@ -489,23 +323,29 @@ class CommandNode:
                 proc.kill()
             msg = "Command execution timed out and was terminated"
             stderr_lines.append(msg)
-            print(f"[CommandNode] {msg}", flush=True)
+            print(f"[RB_Command] {msg}", flush=True)
             try:
                 PromptServer.instance.send_sync("command_node_output", {
-                    "node": unique_id, "data": msg})
+                    "node": node_id,
+                    "data": msg})
             except Exception:
                 pass
             raise TimeoutError(f"Command timed out ({timeout}s)")
 
         except Exception as e:
             msg = f"{type(e).__name__}: {e}"
-            print(f"[CommandNode Error] {msg}", flush=True)
+            print(f"[RB_Command Error] {msg}", flush=True)
             traceback.print_exc()
             try:
                 PromptServer.instance.send_sync("command_node_output", {
-                    "node": unique_id, "data": msg})
+                    "node": node_id,
+                    "data": msg})
             except Exception:
                 pass
             raise
-
-    _cache: Dict[str, tuple] = {}
+        finally:
+            for f in temp_files:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass

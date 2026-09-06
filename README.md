@@ -1,4 +1,4 @@
-# ComfyUI Command Node
+# ComfyUI RB Command
 
 Execute shell commands/scripts directly within ComfyUI workflows, with streaming output and dynamic input slots.
 
@@ -17,7 +17,7 @@ Execute shell commands/scripts directly within ComfyUI workflows, with streaming
 
 ```bash
 cd ComfyUI/custom_nodes/
-git clone https://github.com/itribs/comfyui-command.git
+git clone https://github.com/itribs/comfyui-rb-command.git
 pip install -r requirements.txt
 ```
 
