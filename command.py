@@ -16,9 +16,9 @@ from .media_utils import extract_media_path, classify_input_type
 
 
 class RB_Command:
-    """Command execution node (streaming output + dynamic inputs, Impact Pack pattern)"""
+    """Command execution node"""
 
-    DESCRIPTION = "Execute shell commands/scripts with dynamic inputs, streaming output, and result caching. Supports placeholders ({input0}, {seed}) and environment variables ($INPUT_0, $SEED, etc.)."
+    DESCRIPTION = "Execute shell commands/scripts with dynamic inputs, and result caching. Supports placeholders ({input0}, {seed}) and environment variables ($INPUT_0, $SEED, etc.)."
     INPUT_MAX = 20
     CACHE_MAXSIZE = 1
 
