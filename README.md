@@ -1,6 +1,6 @@
 # ComfyUI RB Command
 
-Execute shell commands/scripts directly within ComfyUI workflows, with streaming output and dynamic input slots.
+Execute shell commands/scripts with dynamic inputs, and result caching. Supports placeholders ({input0}, {seed}) and environment variables ($INPUT_0, $SEED, etc.).
 
 ![demo](demo.png)
 
