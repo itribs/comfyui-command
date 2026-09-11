@@ -22,6 +22,8 @@ def is_audio_dict(value) -> bool:
 def extract_media_path(value, temp_files=None) -> Optional[str]:
     """Extract file path from ComfyUI data types, returns None on failure"""
     if isinstance(value, str):
+        if not value:
+            return None
         if os.path.exists(value):
             return value
         full = os.path.join(folder_paths.get_input_directory(), value)

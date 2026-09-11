@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-rb-command"
 description = "Execute shell commands/scripts with dynamic inputs, and result caching. Supports placeholders ({input0}, {seed}) and environment variables ($INPUT_0, $SEED, etc.)."
-version = "1.0.0"
+version = "1.0.1"
 license = { file = "LICENSE" }
 dependencies = ["numpy", "Pillow", "scipy"]
 

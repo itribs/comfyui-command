@@ -60,7 +60,8 @@ app.registerExtension({
     },
 
     beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name !== "RB_Command") return;
+        if (nodeData.name !== "RB_Command" && nodeData.name !== "RB_CommandInputBundle") return;
+        const isBundleNode = nodeData.name === "RB_CommandInputBundle";
 
         const onConnectionsChange = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function (type, index, connected, link_info) {
@@ -138,14 +139,16 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             const r = onNodeCreated?.apply(this, arguments);
 
-            const commandWidget = this.widgets?.find(w => w.name === "command");
-            if (commandWidget) {
-                commandWidget.tooltip =
-                    "Placeholders: {input0} {input_count} {input_all} {input_image_count} {input_video_count} {input_audio_count} {seed}\n" +
-                    "Environment variables: $INPUT_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL $INPUT_IMAGE_COUNT $INPUT_VIDEO_COUNT $INPUT_AUDIO_COUNT";
-            }
+            if (!isBundleNode) {
+                const commandWidget = this.widgets?.find(w => w.name === "command");
+                if (commandWidget) {
+                    commandWidget.tooltip =
+                        "Placeholders: {input0} {input0_0} {input0_count} {input_count} {input_all} {input_images} {input_videos} {input_audios} {input_image_count} {input_video_count} {input_audio_count} {seed}\n" +
+                        "Environment variables: $INPUT_0 $INPUT_0_0 $INPUT_1 $SEED $INPUT_COUNT $INPUT_ALL $INPUT_IMAGES $INPUT_VIDEOS $INPUT_AUDIOS $INPUT_IMAGE_COUNT $INPUT_VIDEO_COUNT $INPUT_AUDIO_COUNT";
+                }
 
-            this.addCommandOutputPanel();
+                this.addCommandOutputPanel();
+            }
 
             return r;
         };
